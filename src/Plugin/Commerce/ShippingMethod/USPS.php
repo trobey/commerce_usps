@@ -9,6 +9,7 @@ use Drupal\commerce_shipping\ShippingRate;
 use Drupal\commerce_shipping\ShippingService;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\commerce_shipping\Plugin\Commerce\ShippingMethod\ShippingMethodBase;
+use Drupal\Component\Utility\Unicode;
 
 /**
  * Provides the USPS shipping method.
@@ -35,7 +36,7 @@ class USPS extends ShippingMethodBase {
   public function __construct(array $configuration, $plugin_id, $plugin_definition, PackageTypeManagerInterface $package_type_manager) {
     parent::__construct($configuration, $plugin_id, $plugin_definition, $package_type_manager);
 
-    $this->services['default'] = new ShippingService('default', $this->configuration['rate_label']);
+    $this->services['default'] = new ShippingService('default', $plugin_id);
   }
 
   /**
@@ -43,19 +44,13 @@ class USPS extends ShippingMethodBase {
    */
   public function defaultConfiguration() {
     return [
-      'from' => '',
-      'services' => [
-        'domestic' => [],
-        'international' => [],
-      ],
-      'connection' => [
-        'address' => 'http://production.shippingapis.com/ShippingAPI.dll',
-        'username' => '',
-      ],
-      'advanced' => [
-        'logo' => 0,
-        'log' => 'no',
-      ],
+      'commerce_usps_postal_code' => '',
+      'commerce_usps_services' => [],
+      'commerce_usps_services_int' => [],
+      'commerce_usps_connection_address' => 'http://production.shippingapis.com/ShippingAPI.dll',
+      'commerce_usps_user' => '',
+      'commerce_usps_show_logo' => NULL,
+      'commerce_usps_log' => 'no',
     ] + parent::defaultConfiguration();
   }
 
@@ -65,27 +60,24 @@ class USPS extends ShippingMethodBase {
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
     $form = parent::buildConfigurationForm($form, $form_state);
 
-    $form['from'] = [
+    $form['origin'] = [
       '#type' => 'fieldset',
       '#title' => t('Ship from location'),
       '#collapsible' => TRUE,
       '#collapsed' => FALSE,
       '#weight' => 10,
     ];
-    $form['from']['location'] = [
+    $form['origin']['commerce_usps_postal_code'] = [
       '#type' => 'textfield',
       '#title' => t('Postal Code'),
-      '#required' => TRUE,
-      '#default_value' => $this->configuration['from'],
+      '#default_value' => $this->configuration['commerce_usps_postal_code'],
     ];
 
-    $form['services'] = [
+    $form['settings'] = [
       '#type' => 'fieldset',
       '#title' => t('Shipment settings'),
       '#collapsible' => TRUE,
-      '#collapsed' => FALSE,
       '#weight' => 20,
-      '#tree' => TRUE,
     ];
     $options = [
       'usps_first_class' => 'USPS First Class',
@@ -95,12 +87,12 @@ class USPS extends ShippingMethodBase {
       'usps_media_mail' => 'USPS Media Mail',
       'usps_library_mail' => 'USPS Library Mail',
     ];
-    $form['services']['domestic'] = [
+    $form['settings']['commerce_usps_services'] = [
       '#title' => t('USPS Services'),
       '#type' => 'checkboxes',
       '#options' => $options,
       '#description' => t('Select the USPS services that are available to customers.'),
-      '#default_value' => $this->configuration['services']['domestic'],
+      '#default_value' => $this->configuration['commerce_usps_services'],
     ];
 
     $options = [
@@ -113,34 +105,33 @@ class USPS extends ShippingMethodBase {
       'usps_first_class_mail_international_package' => 'USPS First-Class Mail International Package',
       'usps_priority_mail_express_international_flat_rate_boxes' => 'USPS Priority Mail Express International Flat Rate Boxes',
     ];
-    $form['services']['international'] = [
+    $form['settings']['commerce_usps_services_int'] = [
       '#title' => t('USPS International Services'),
       '#type' => 'checkboxes',
       '#options' => $options,
       '#description' => t('Select the USPS International services that are available to customers.'),
-      '#default_value' => $this->configuration['services']['international'],
+      '#default_value' => $this->configuration['commerce_usps_services_int'],
     ];
 
-    $form['connection'] = [
+    $form['api'] = [
       '#type' => 'fieldset',
       '#title' => t('USPS Connection Settings'),
       '#collapsible' => TRUE,
-      '#collapsed' => FALSE,
       '#weight' => 30,
     ];
-    $form['connection']['address'] = [
+    $form['api']['commerce_usps_connection_address'] = [
       '#type' => 'textfield',
       '#title' => t('Connection Address'),
       '#description' => t('Leave this set to http://production.shippingapis.com/ShippingAPI.dll unless you have a reason to change it.'),
       '#required' => TRUE,
-      '#default_value' => $this->configuration['connection']['address'],
+      '#default_value' => $this->configuration['commerce_usps_connection_address'],
     ];
-    $form['connection']['username'] = [
+    $form['api']['commerce_usps_user'] = [
       '#type' => 'textfield',
       '#title' => t('Username'),
       '#description' => t('The username for your USPS account.') . '<b>' . t('You must have been granted') . ' <a href="https://www.usps.com/business/web-tools-apis/developers-center.htm">' . t('production access') . '</a> ' . t('for this module to work.') . '</b>',
       '#required' => TRUE,
-      '#default_value' => $this->configuration['connection']['username'],
+      '#default_value' => $this->configuration['commerce_usps_user'],
     ];
 
     $form['advanced'] = [
@@ -150,23 +141,40 @@ class USPS extends ShippingMethodBase {
       '#collapsed' => TRUE,
       '#weight' => 40,
     ];
-    $form['advanced']['logo'] = [
+    $form['advanced']['commerce_usps_show_logo'] = [
       '#type' => 'checkbox',
       '#title' => t('Show USPS logo next to service'),
-      '#default_value' => $this->configuration['advanced']['logo'],
+      '#default_value' => $this->configuration['commerce_usps_show_logo'],
     ];
     $options = [
       'no' => t('Do not log messages'),
       'yes' => t('Log messages'),
     ];
-    $form['advanced']['log'] = [
+    $form['advanced']['commerce_usps_log'] = [
       '#type' => 'radios',
       '#title' => t('Log messages from this module (useful for debugging)'),
-      '#default_value' => $this->configuration['advanced']['log'],
+      '#default_value' => $this->configuration['commerce_usps_log'],
       '#options' => $options,
     ];
 
     return $form;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function validateConfigurationForm(array &$form, FormStateInterface $form_state) {
+    $values = $form_state->getValue($form['#parents']);
+    // Check for a valid postal code.
+    $postal_code = $values['origin']['commerce_usps_postal_code'];
+    if (!is_numeric($postal_code) || strlen($postal_code) != 5) {
+      $form_state->setErrorByName('plugin[0][plugin_select][target_plugin_configuration][origin][commerce_usps_postal_code]', $this->t('You must enter a 5 digit zip code'));
+    }
+    // Disallow USPS testing urls.
+    $connection_address = $values['api']['commerce_usps_connection_address'];
+    if (preg_match('/testing/', Unicode::strtolower($connection_address))) {
+      $form_state->setErrorByName('plugin[0][plugin_select][target_plugin_configuration][api][commerce_usps_connection_address]', $this->t('Only production urls will work with this module. Please have USPS extend production access to your Webtools account by calling or emailing them.'));
+    }
   }
 
   /**
@@ -177,10 +185,13 @@ class USPS extends ShippingMethodBase {
 
     if (!$form_state->getErrors()) {
       $values = $form_state->getValue($form['#parents']);
-      $this->configuration['from'] = $values['from']['location'];
-      $this->configuration['services'] = $values['services'];
-      $this->configuration['connection'] = $values['connection'];
-      $this->configuration['advanced'] = $values['advanced'];
+      $this->configuration['commerce_usps_postal_code'] = $values['origin']['commerce_usps_postal_code'];
+      $this->configuration['commerce_usps_services'] = $values['settings']['commerce_usps_services'];
+      $this->configuration['commerce_usps_services_int'] = $values['settings']['commerce_usps_services_int'];
+      $this->configuration['commerce_usps_connection_address'] = $values['api']['commerce_usps_connection_address'];
+      $this->configuration['commerce_usps_user'] = $values['api']['commerce_usps_user'];
+      $this->configuration['commerce_usps_show_logo'] = $values['advanced']['commerce_usps_show_logo'];
+      $this->configuration['commerce_usps_log'] = $values['advanced']['commerce_usps_log'];
     }
   }
 
