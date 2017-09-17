@@ -199,15 +199,62 @@ class USPS extends ShippingMethodBase {
    * {@inheritdoc}
    */
   public function calculateRates(ShipmentInterface $shipment) {
+    if (!$this->validateOrder($shipment)) {
+      return [];
+    }
+
     // Rate IDs aren't used in a flat rate scenario because there's always a
     // single rate per plugin, and there's no support for purchasing rates.
     $rate_id = 0;
-    $amount = $this->configuration['rate_amount'];
-    $amount = new Price($amount['number'], $amount['currency_code']);
+    $amount = new Price('1.00', 'USD');
     $rates = [];
     $rates[] = new ShippingRate($rate_id, $this->services['default'], $amount);
 
     return $rates;
+  }
+
+  /**
+   * Validate order.
+   *
+   * @param object $shipment
+   *   Shipment object.
+   *
+   * @return bool
+   *   Returns TRUE if the order passes validation.
+   */
+  protected function validateOrder($shipment) {
+    $shippingAddress = $this->getShippingAddress($shipment);
+
+    // We have to have a shipping address to get rates.
+    if (empty($shippingAddress)) {
+      return FALSE;
+    }
+
+    // US shipping addresses require a zipcode.
+    if ($shippingAddress['country_code'] == 'US' && empty($shippingAddress['postal_code'])) {
+      return FALSE;
+    }
+
+    // Make sure the order is shippable (@todo: get weight).
+    return TRUE;
+  }
+
+  /**
+   * Get the shipping address of the order.
+   *
+   * @param object $shipment
+   *   Shipment object.
+   *
+   * @return array
+   *   Address array.
+   */
+  protected function getShippingAddress($shipment) {
+    $addressList = $shipment->getShippingProfile()->get('address');
+    if (count($addressList) == 0) {
+      return NULL;
+    }
+    $address = $addressList->getValue()[0];
+    return $address;
   }
 
 }

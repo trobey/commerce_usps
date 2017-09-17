@@ -6,65 +6,6 @@
  */
 
 /**
- * Implements hook_menu().
- */
-function commerce_usps_menu() {
-  $items = array();
-  $items['admin/commerce/config/shipping/methods/usps/edit'] = array(
-    'title' => 'Edit',
-    'description' => 'Adjust USPS shipping settings.',
-    'page callback' => 'drupal_get_form',
-    'page arguments' => array('commerce_usps_settings_form'),
-    'access arguments' => array('administer shipping'),
-    'file' => 'includes/commerce_usps.admin.inc',
-    'type' => MENU_LOCAL_TASK,
-    'context' => MENU_CONTEXT_INLINE,
-    'weight' => 0,
-  );
-
-  return $items;
-}
-
-/**
- * Implements hook_commerce_shipping_method_info().
- */
-function commerce_usps_commerce_shipping_method_info() {
-  return array(
-    'usps' => array(
-      'title' => t('USPS'),
-      'description' => t('USPS services.'),
-    ),
-  );
-}
-
-/**
- * Implements hook_commerce_shipping_service_info().
- */
-function commerce_usps_commerce_shipping_service_info() {
-  $registered_services = array();
-  $available = array_merge(commerce_usps_service_list('domestic'), commerce_usps_service_list('international'));
-  $enabled = array_merge(variable_get('commerce_usps_services', array()), variable_get('commerce_usps_services_int', array()));
-
-  // Add enabled USPS services to the commerce_shipping service info.
-  foreach ($enabled as $machine_name => $service) {
-    if ($service) {
-      $registered_services[$machine_name] = array(
-        'title' => $available[$machine_name]['title'],
-        'description' => $available[$machine_name]['title'],
-        'display_title' => $available[$machine_name]['title'],
-        'shipping_method' => 'usps',
-        'price_component' => 'shipping',
-        'callbacks' => array(
-          'rate' => 'commerce_usps_rate',
-        ),
-      );
-    }
-  }
-
-  return $registered_services;
-}
-
-/**
  * Returns a base price array for a shipping service calculated for the order.
  *
  * @param array $service
