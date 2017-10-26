@@ -13,7 +13,7 @@
  *
  * @see hook_commerce_usps_services_list_alter()
  */
-function hook_commerce_usps_services_list_alter(&$usps_services) {
+function hook_commerce_usps_services_list_alter(array &$usps_services) {
   // No example.
 }
 

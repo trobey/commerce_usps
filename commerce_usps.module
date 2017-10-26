@@ -153,7 +153,7 @@ function commerce_usps_service_list($type = '') {
   );
 
   // Allow other modules to add or alter services.
-  drupal_alter('commerce_usps_services_list', $usps_services);
+  \Drupal::moduleHandler()->alter('commerce_usps_services_list', $usps_services);
 
   // If the service destination is defined, return only those services.
   if (!empty($usps_services[$type])) {
@@ -167,9 +167,7 @@ function commerce_usps_service_list($type = '') {
  * Helper function to log USPS messages.
  */
 function commerce_usps_log($message, $variables = array(), $severity = WATCHDOG_NOTICE) {
-  if (variable_get('commerce_usps_log')) {
-    watchdog('commerce_usps', $message, $variables, $severity);
-  }
+  watchdog('commerce_usps', $message, $variables, $severity);
 }
 
 /**

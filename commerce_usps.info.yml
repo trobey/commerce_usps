@@ -3,5 +3,5 @@ type: module
 description: 'Integrates USPS with Commerce Shipping to rate selected USPS services during checkout.'
 package: Commerce (shipping)
 core: 8.x
-deependencies:
+dependencies:
   - commerce_shipping

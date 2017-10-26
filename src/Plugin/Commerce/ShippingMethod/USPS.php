@@ -10,6 +10,8 @@ use Drupal\commerce_shipping\ShippingService;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\commerce_shipping\Plugin\Commerce\ShippingMethod\ShippingMethodBase;
 use Drupal\Component\Utility\Unicode;
+use Drupal\physical\Weight;
+use Drupal\physical\WeightUnit;
 
 /**
  * Provides the USPS shipping method.
@@ -79,14 +81,11 @@ class USPS extends ShippingMethodBase {
       '#collapsible' => TRUE,
       '#weight' => 20,
     ];
-    $options = [
-      'usps_first_class' => 'USPS First Class',
-      'usps_priority_mail' => 'USPS Priority Mail',
-      'usps_express_mail' => 'USPS Express Mail',
-      'usps_standard_post' => 'USPS StandardPost',
-      'usps_media_mail' => 'USPS Media Mail',
-      'usps_library_mail' => 'USPS Library Mail',
-    ];
+    $domestic = commerce_usps_service_list('domestic');
+    $options = [];
+    foreach ($domestic as $id => $service) {
+      $options[$id] = $service['title'];
+    }
     $form['settings']['commerce_usps_services'] = [
       '#title' => t('USPS Services'),
       '#type' => 'checkboxes',
@@ -95,20 +94,15 @@ class USPS extends ShippingMethodBase {
       '#default_value' => $this->configuration['commerce_usps_services'],
     ];
 
-    $options = [
-      'usps_priority_mail_express_international' => 'USPS Priority Mail Express International',
-      'usps_priority_mail_international' => 'USPS Priority Mail International',
-      'usps_global_express_guaranteed' => 'USPS Global Express Guaranteed',
-      'usps_priority_mail_international_small_flat_rate_box' => 'USPS Priority Mail International Small Flat Rate Box',
-      'usps_priority_mail_international_medium_flat_rate_box' => 'USPS Priority Mail International Medium Flat Rate Box',
-      'usps_priority_mail_international_large_flat_rate_box' => 'USPS Priority Mail International Large Flat Rate Box',
-      'usps_first_class_mail_international_package' => 'USPS First-Class Mail International Package',
-      'usps_priority_mail_express_international_flat_rate_boxes' => 'USPS Priority Mail Express International Flat Rate Boxes',
-    ];
+    $international = commerce_usps_service_list('international');
+    $options = [];
+    foreach ($international as $id => $service) {
+      $options[$id] = $service['title'];
+    }
     $form['settings']['commerce_usps_services_int'] = [
       '#title' => t('USPS International Services'),
       '#type' => 'checkboxes',
-      '#options' => $options,
+      '#options' => $this->internationalServices,
       '#description' => t('Select the USPS International services that are available to customers.'),
       '#default_value' => $this->configuration['commerce_usps_services_int'],
     ];
@@ -203,14 +197,28 @@ class USPS extends ShippingMethodBase {
       return [];
     }
 
-    // Rate IDs aren't used in a flat rate scenario because there's always a
-    // single rate per plugin, and there's no support for purchasing rates.
-    $rate_id = 0;
-    $amount = new Price('1.00', 'USD');
-    $rates = [];
-    $rates[] = new ShippingRate($rate_id, $this->services['default'], $amount);
+    $shippingAddress = $this->getShippingAddress($shipment);
 
-    return $rates;
+    // Determine which type of rate request to submit.
+    $shippingRates = [];
+    if ($shippingAddress['country_code'] == 'US') {
+      $domestic = commerce_usps_service_list('domestic');
+      $rates = $this->domesticRateV4Request($shipment->getOrder(), $shippingAddress);
+      foreach ($rates as $rate_id => $rate) {
+        $shippingService = new ShippingService($rate_id, $domestic[$rate_id]['title']);
+        $shippingRates[] = new ShippingRate($rate_id, $shippingService, $rate['amount']);
+      }
+    }
+    else {
+      $rates = $this->internationalRateV2Request($shipment->getOrder(), $shippingAddress);
+      $international = commerce_usps_service_list('international');
+      foreach ($rates as $rate_id => $rate) {
+        $shippingService = new ShippingService($rate_id, $internationalServices[$rate_id]['title']);
+        $shippingRates[] = new ShippingRate($rate_id, $shippingService, $rate['amount']);
+      }
+    }
+
+    return $shippingRates;
   }
 
   /**
@@ -223,6 +231,10 @@ class USPS extends ShippingMethodBase {
    *   Returns TRUE if the order passes validation.
    */
   protected function validateOrder($shipment) {
+    $order = $shipment->getOrder();
+    foreach ($order->getItems() as $item) {
+      $product = $item->getPurchasedEntity();
+    }
     $shippingAddress = $this->getShippingAddress($shipment);
 
     // We have to have a shipping address to get rates.
@@ -235,8 +247,56 @@ class USPS extends ShippingMethodBase {
       return FALSE;
     }
 
-    // Make sure the order is shippable (@todo: get weight).
+    // Make sure the order is shippable.
+    if (!$this->isShippable($shipment)) {
+      return FALSE;
+    }
+
     return TRUE;
+  }
+
+  /**
+   * Check if shippable.
+   *
+   * @param object $shipment
+   *   Shipment object.
+   *
+   * @return bool
+   *   Returns TRUE if the order is shippable.
+   */
+  protected function isShippable($shipment) {
+    $order = $shipment->getOrder();
+    foreach ($order->getItems() as $item) {
+      $product = $item->getPurchasedEntity();
+      if (!$product->hasField('weight') || count($product->get('weight')->getValue()) == 0) {
+        return FALSE;
+      }
+    }
+    return TRUE;
+  }
+
+  /**
+   * Get total weight.
+   *
+   * @param object $order
+   *   Order object.
+   * @param string $unit
+   *   Weight unit.
+   *
+   * @return object
+   *   Returns weight object.
+   */
+  protected function getWeight($order, $unit) {
+    $total = new Weight('0', $unit);
+    foreach ($order->getItems() as $item) {
+      $product = $item->getPurchasedEntity();
+      foreach ($product->get('weight')->getValue() as $value) {
+        $weight = new Weight($value['number'], $value['unit']);
+        $weight = $weight->convert($unit);
+        $total = $total->add($weight);
+      }
+    }
+    return $total;
   }
 
   /**
@@ -255,6 +315,193 @@ class USPS extends ShippingMethodBase {
     }
     $address = $addressList->getValue()[0];
     return $address;
+  }
+
+  /**
+   * Builds a domestic USPS rate request.
+   *
+   * @param object $order
+   *   The commerce order object.
+   * @param object $shipping_address
+   *   The commerce_customer_address array of the shipping profile.
+   *
+   * @return array
+   *   An array of shipping rates.
+   */
+  protected function domesticRateV4Request($order, $shipping_address) {
+    $rates = array();
+    $usps_services = commerce_usps_service_list('domestic');
+
+    $weight = $this->getWeight($order, WeightUnit::OUNCE);
+    $pounds = floor($weight->getNumber() / 16.0);
+    $ounces = fmod($weight->getNumber(), 16.0);
+
+    $request = new \SimpleXMLElement('<RateV4Request/>');
+    $request->addAttribute('USERID', $this->configuration['commerce_usps_user']);
+    $request->addChild('Revision', 2);
+    // @TODO: Support multiple packages based on physical attributes.
+    // Add a package to the request for each enabled service.
+    $i = 1;
+
+    foreach ($this->configuration['commerce_usps_services'] as $machine_name => $service) {
+      if (!empty($service)) {
+        $package = $request->addChild('Package');
+        $package->addAttribute('ID', $i);
+        $package->addChild('Service', $usps_services[$machine_name]['request_name']);
+        $package->addChild('FirstClassMailType', 'PARCEL');
+        $package->addChild('ZipOrigination', substr($this->configuration['commerce_usps_postal_code'], 0, 5));
+        $package->addChild('ZipDestination', substr($shipping_address['postal_code'], 0, 5));
+        $package->addChild('Pounds', $pounds);
+        $package->addChild('Ounces', $ounces);
+        $package->addChild('Container', 'VARIABLE');
+        $package->addChild('Size', 'REGULAR');
+        $package->addChild('Machinable', 'TRUE');
+        $i++;
+      }
+    }
+
+    \Drupal::moduleHandler()->alter('commerce_usps_rate_v4_request', $request);
+
+    // Submit the rate request to USPS.
+    $response = $this->apiRequest('API=RateV4&XML=' . $request->asXML());
+
+    if (!empty($response->Package)) {
+      // Loop through each of the package results to build the rate array.
+      $entity_manager = \Drupal::entityManager();
+      $store = $entity_manager->getStorage('commerce_store')->loadDefault();
+      $currency = $store->getDefaultCurrencyCode();
+      foreach ($response->Package as $package) {
+        if (empty($package->Error)) {
+          // Load the shipping service's class id from the package response.
+          $id = (string) $package->Postage->attributes()->{'CLASSID'};
+
+          // Look up the shipping service by it's class id.
+          $usps_service = commerce_usps_service_by_id($id, 'domestic');
+
+          // Make sure that the package service is registered.
+          if (!empty($usps_service['machine_name'])) {
+            $amount = new Price((string) $package->Postage->Rate, 'USD');
+            $amount = $amount->convert($currency);
+            $rates[$usps_service['machine_name']] = array(
+              'amount' => $amount,
+              'currency_code' => $currency,
+              'data' => array(),
+            );
+          }
+        }
+      }
+    }
+    return $rates;
+  }
+
+  /**
+   * Builds an international USPS rate request.
+   *
+   * @param object $order
+   *   The commerce order object.
+   * @param object $shipping_address
+   *   The commerce_customer_address array of the shipping profile.
+   *
+   * @return array
+   *   An array of shipping rates.
+   */
+  protected function internationalRateV2Request($order, $shipping_address) {
+    $rates = array();
+
+    $weight = commerce_usps_get_order_weight($order);
+
+    $request = new SimpleXMLElement('<IntlRateV2Request/>');
+    $request->addAttribute('USERID', variable_get('commerce_usps_user', ''));
+    $request->addChild('Revision', 2);
+    $shipment_value = commerce_usps_get_shipment_value($order);
+
+    // @TODO: Support multiple packages based on physical attributes.
+    $package = $request->addChild('Package');
+    $package->addAttribute('ID', 1);
+    $package->addChild('Pounds', $weight['pounds']);
+    $package->addChild('Ounces', $weight['ounces']);
+    $package->addChild('Machinable', 'True');
+    $package->addChild('MailType', 'Package');
+    $package->addChild('ValueOfContents', commerce_currency_amount_to_decimal($shipment_value, commerce_default_currency()));
+    $package->addChild('Country', commerce_usps_country_get_predefined_list($shipping_address['country']));
+    $package->addChild('Container', 'RECTANGULAR');
+    $package->addChild('Size', 'REGULAR');
+    $package->addChild('Width', '');
+    $package->addChild('Length', '');
+    $package->addChild('Height', '');
+    $package->addChild('Girth', '');
+    $package->addChild('OriginZip', substr(variable_get('commerce_usps_postal_code', ''), 0, 5));
+    $package->addChild('CommercialFlag', 'N');
+
+    drupal_alter('commerce_usps_intl_rate_v2_request', $request);
+
+    // Submit the rate request to USPS.
+    $response = $this->apiRequest('API=IntlRateV2&XML=' . $request->asXML());
+
+    if (!empty($response->Package->Service)) {
+      foreach ($response->Package->Service as $service) {
+        $id = (string) $service->attributes()->{'ID'};
+
+        // Look up the shipping service by it's id.
+        $usps_service = commerce_usps_service_by_id($id, 'international');
+
+        // Make sure that the package service is registered.
+        if (!empty($usps_service['machine_name'])) {
+          $rates[$usps_service['machine_name']] = array(
+            'amount' => commerce_currency_decimal_to_amount((string) $service->Postage, commerce_default_currency()),
+            'currency_code' => commerce_default_currency(),
+            'data' => array(),
+          );
+        }
+      }
+    }
+
+    return $rates;
+  }
+
+  /**
+   * Submits an API request to USPS.
+   *
+   * @param string $request
+   *   A request string.
+   * @param string $message
+   *   Optional log message.
+   *
+   * @return string
+   *   XML string response from USPS
+   */
+  protected function apiRequest($request, $message = '') {
+
+    if ($this->configuration['commerce_usps_log'] == 'yes') {
+      \Drupal::logger('commerce_usps')->notice(t('Submitting API request to USPS. @message:<pre>@request</pre>', array('@message' => $message, '@request' => $request)));
+    }
+
+    $request_url = $this->configuration['commerce_usps_connection_address'];
+
+    // Send the request.
+    $client = \Drupal::httpClient();
+    $options = ['body' => $request];
+    try {
+      $response = $client->request('POST', $request_url, ['body' => $request]);
+      $code = $response->getStatusCode();
+      if ($code == 200) {
+        $body = $response->getBody()->getContents();
+        if ($this->configuration['commerce_usps_log'] == 'yes') {
+          \Drupal::logger('commerce_usps')->notice(t('Response code:@code<br />Response:<pre>@response</pre>', array('@code' => $code, '@response' => $body)));
+        }
+        return new \SimpleXMLElement($body);
+      }
+      else {
+        if ($this->configuration['commerce_usps_log'] == 'yes') {
+          \Drupal::logger('commerce_usps')->error(t('We did not receive a response from USPS. Make sure you have the correct server url in your settings.'));
+        }
+      }
+    }
+    catch (RequestException $e) {
+      watchdog_exception('commerce_usps', $e);
+    }
+
+    return FALSE;
   }
 
 }
