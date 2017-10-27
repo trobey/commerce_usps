@@ -407,8 +407,11 @@ class USPS extends ShippingMethodBase {
    */
   protected function internationalRateV2Request($order, $shipping_address) {
     $rates = array();
+    $usps_services = commerce_usps_service_list('domestic');
 
-    $weight = commerce_usps_get_order_weight($order);
+    $weight = $this->getWeight($order, WeightUnit::OUNCE);
+    $pounds = floor($weight->getNumber() / 16.0);
+    $ounces = fmod($weight->getNumber(), 16.0);
 
     $request = new SimpleXMLElement('<IntlRateV2Request/>');
     $request->addAttribute('USERID', variable_get('commerce_usps_user', ''));

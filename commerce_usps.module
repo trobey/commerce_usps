@@ -6,74 +6,6 @@
  */
 
 /**
- * Returns a base price array for a shipping service calculated for the order.
- *
- * @param array $service
- *   An array describing the shipping service.
- * @param object $order
- *   The order object.
- *
- * @return array
- *   The service rates returned from USPS
- */
-function commerce_usps_rate($service, $order) {
-  // Attempt to recover cached shipping rates.
-  $rates = commerce_shipping_rates_cache_get('usps', $order, variable_get('commerce_usps_rates_timeout', 0));
-
-  // If no cached rates were found or they have expired.
-  if (!is_array($rates) && commerce_usps_validate_order($order)) {
-
-    // Load files required for building requests.
-    require_once dirname(__FILE__) . '/includes/commerce_usps.xml.inc';
-
-    $shipping_address = commerce_usps_get_order_shipping_address($order);
-
-    // Determine which type of rate request to submit.
-    if ($shipping_address['country'] == 'US') {
-      $rates = commerce_usps_rate_v4_request($order, $shipping_address);
-    }
-    else {
-      $rates = commerce_usps_intl_rate_v2_request($order, $shipping_address);
-    }
-
-    commerce_shipping_rates_cache_set('usps', $order, (array) $rates);
-  }
-
-  // Return the rate for the requested service or FALSE if not found.
-  return isset($rates[$service['name']]) ? $rates[$service['name']] : FALSE;
-}
-
-/**
- * Validate that the order can return a successful rate request.
- *
- * @param object $order
- *   The order object.
- *
- * @return bool
- *   Returns TRUE if the order passes validation.
- */
-function commerce_usps_validate_order($order) {
-  $shipping_address = commerce_usps_get_order_shipping_address($order);
-
-  // We have to have a shipping address to get rates.
-  if (empty($shipping_address)) {
-    return FALSE;
-  }
-
-  // US shipping addresses require a zipcode.
-  if ($shipping_address['country'] == 'US' && empty($shipping_address['postal_code'])) {
-    return FALSE;
-  }
-
-  // Make sure the order is shippable.
-  if (!commerce_usps_get_order_weight($order)) {
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-/**
  * Returns an array of USPS services and related data.
  *
  * @param string $type
@@ -164,13 +96,6 @@ function commerce_usps_service_list($type = '') {
 }
 
 /**
- * Helper function to log USPS messages.
- */
-function commerce_usps_log($message, $variables = array(), $severity = WATCHDOG_NOTICE) {
-  watchdog('commerce_usps', $message, $variables, $severity);
-}
-
-/**
  * Look up a USPS shipping service by it's id.
  */
 function commerce_usps_service_by_id($id, $type) {
@@ -179,43 +104,6 @@ function commerce_usps_service_by_id($id, $type) {
       return array_merge(array('machine_name' => $machine_name), $service);
     }
   }
-}
-
-/**
- * Determine the weight of the order.
- */
-function commerce_usps_get_order_weight($order) {
-  // Use commerce physical to determine the order weight.
-  $weight = commerce_physical_order_weight($order, 'lb');
-
-  // If order contains no weight skip sending request to usps.
-  if (!is_array($weight) || $weight['weight'] == NULL) {
-    return FALSE;
-  }
-
-  // Calculate the weight in ounces and pounds.
-  $ounces = number_format(16 * ($weight['weight'] - floor($weight['weight'])), 1);
-  $pounds = floor($weight['weight']);
-
-  return array('pounds' => $pounds, 'ounces' => $ounces);
-}
-
-/**
- * Get the shipping address of the order.
- */
-function commerce_usps_get_order_shipping_address($order) {
-  $shipping_address = array();
-  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
-
-  // Determine the shipping profile reference field name for the order.
-  $field_name = commerce_physical_order_shipping_field_name($order);
-
-  // Prepare the shipping address for use in the request.
-  if (!empty($order_wrapper->{$field_name}->commerce_customer_address)) {
-    $shipping_address = $order_wrapper->{$field_name}->commerce_customer_address->value();
-  }
-
-  return $shipping_address;
 }
 
 /**

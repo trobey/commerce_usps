@@ -10,12 +10,12 @@ This module depends on the Commerce module
 
 In addition, the following modules are required: 
 
-* Commerce Physical - http://www.drupal.org/project/commerce_physical - 
+* Physical - http://www.drupal.org/project/physical - 
 this module is used to define the physical properties (weight and 
 dimensions) of each product. This information is necessary to determine 
 a shipping estimate. 
 
-* Commerce Shipping (7.x-2.x) - 
+* Commerce Shipping - 
 http://www.drupal.org/project/commerce_shipping - this provides the 
 infrastructure for Commerce UPS to fully integrate with the Commerce 
 module. 
