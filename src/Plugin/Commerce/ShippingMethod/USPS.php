@@ -102,7 +102,7 @@ class USPS extends ShippingMethodBase {
     $form['settings']['commerce_usps_services_int'] = [
       '#title' => t('USPS International Services'),
       '#type' => 'checkboxes',
-      '#options' => $this->internationalServices,
+      '#options' => $options,
       '#description' => t('Select the USPS International services that are available to customers.'),
       '#default_value' => $this->configuration['commerce_usps_services_int'],
     ];
@@ -212,9 +212,12 @@ class USPS extends ShippingMethodBase {
     else {
       $rates = $this->internationalRateV2Request($shipment->getOrder(), $shippingAddress);
       $international = commerce_usps_service_list('international');
+      $services_intl = $this->configuration['commerce_usps_services_int'];
       foreach ($rates as $rate_id => $rate) {
-        $shippingService = new ShippingService($rate_id, $internationalServices[$rate_id]['title']);
-        $shippingRates[] = new ShippingRate($rate_id, $shippingService, $rate['amount']);
+        if (isset($services_intl[$rate_id]) && $services_intl[$rate_id]) {
+          $shippingService = new ShippingService($rate_id, $international[$rate_id]['title']);
+          $shippingRates[] = new ShippingRate($rate_id, $shippingService, $rate['amount']);
+        }
       }
     }
 
@@ -296,6 +299,22 @@ class USPS extends ShippingMethodBase {
         $total = $total->add($weight);
       }
     }
+    return $total;
+  }
+
+  /**
+   * Get value of order.
+   *
+   * @param object $order
+   *   Order object.
+   *
+   * @return string
+   *   Returns subtotal.
+   */
+  protected function getShipmentValue($order) {
+    $total = 0;
+    $subtotal = explode(' ', $order->getSubtotalPrice());
+    $total = $subtotal[0];
     return $total;
   }
 
@@ -391,6 +410,7 @@ class USPS extends ShippingMethodBase {
         }
       }
     }
+
     return $rates;
   }
 
@@ -413,30 +433,30 @@ class USPS extends ShippingMethodBase {
     $pounds = floor($weight->getNumber() / 16.0);
     $ounces = fmod($weight->getNumber(), 16.0);
 
-    $request = new SimpleXMLElement('<IntlRateV2Request/>');
-    $request->addAttribute('USERID', variable_get('commerce_usps_user', ''));
+    $request = new \SimpleXMLElement('<IntlRateV2Request/>');
+    $request->addAttribute('USERID', $this->configuration['commerce_usps_user']);
     $request->addChild('Revision', 2);
-    $shipment_value = commerce_usps_get_shipment_value($order);
+    $shipment_value = $this->getShipmentValue($order);
 
     // @TODO: Support multiple packages based on physical attributes.
     $package = $request->addChild('Package');
     $package->addAttribute('ID', 1);
-    $package->addChild('Pounds', $weight['pounds']);
-    $package->addChild('Ounces', $weight['ounces']);
+    $package->addChild('Pounds', $pounds);
+    $package->addChild('Ounces', $ounces);
     $package->addChild('Machinable', 'True');
     $package->addChild('MailType', 'Package');
-    $package->addChild('ValueOfContents', commerce_currency_amount_to_decimal($shipment_value, commerce_default_currency()));
-    $package->addChild('Country', commerce_usps_country_get_predefined_list($shipping_address['country']));
+    $package->addChild('ValueOfContents', $shipment_value);
+    $package->addChild('Country', commerce_usps_country_get_predefined_list($shipping_address['country_code']));
     $package->addChild('Container', 'RECTANGULAR');
     $package->addChild('Size', 'REGULAR');
     $package->addChild('Width', '');
     $package->addChild('Length', '');
     $package->addChild('Height', '');
     $package->addChild('Girth', '');
-    $package->addChild('OriginZip', substr(variable_get('commerce_usps_postal_code', ''), 0, 5));
+    $package->addChild('OriginZip', substr($this->configuration['commerce_usps_postal_code'], 0, 5));
     $package->addChild('CommercialFlag', 'N');
 
-    drupal_alter('commerce_usps_intl_rate_v2_request', $request);
+    \Drupal::moduleHandler()->alter('commerce_usps_intl_rate_v2_request', $request);
 
     // Submit the rate request to USPS.
     $response = $this->apiRequest('API=IntlRateV2&XML=' . $request->asXML());
@@ -450,9 +470,10 @@ class USPS extends ShippingMethodBase {
 
         // Make sure that the package service is registered.
         if (!empty($usps_service['machine_name'])) {
+          $amount = new Price((string) $service->Postage, 'USD');
           $rates[$usps_service['machine_name']] = array(
-            'amount' => commerce_currency_decimal_to_amount((string) $service->Postage, commerce_default_currency()),
-            'currency_code' => commerce_default_currency(),
+            'amount' => $amount,
+            'currency_code' => 'USD',
             'data' => array(),
           );
         }
