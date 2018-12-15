@@ -271,7 +271,7 @@ class USPS extends ShippingMethodBase {
     $order = $shipment->getOrder();
     foreach ($order->getItems() as $item) {
       $product = $item->getPurchasedEntity();
-      if (!$product->hasField('weight') || count($product->get('weight')->getValue()) == 0) {
+      if (!$product || !$product->hasField('weight') || count($product->get('weight')->getValue()) == 0) {
         return FALSE;
       }
     }
