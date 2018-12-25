@@ -293,8 +293,10 @@ class USPS extends ShippingMethodBase {
     $total = new Weight('0', $unit);
     foreach ($order->getItems() as $item) {
       $product = $item->getPurchasedEntity();
+      $quantity = $item->getQuantity();
       foreach ($product->get('weight')->getValue() as $value) {
-        $weight = new Weight($value['number'], $value['unit']);
+        $number = $quantity * $value['number'];
+        $weight = new Weight((string) $number, $value['unit']);
         $weight = $weight->convert($unit);
         $total = $total->add($weight);
       }
